@@ -8,10 +8,14 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
-def find_free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
+def find_free_port(exclude: set[int] | None = None) -> int:
+    exclude = exclude or set()
+    while True:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+            port = sock.getsockname()[1]
+        if port not in exclude:
+            return port
 
 
 def wait_for_output(process, text: str, timeout: float = 5.0) -> str:
@@ -28,7 +32,8 @@ def wait_for_output(process, text: str, timeout: float = 5.0) -> str:
 
 def test_local_sender_receiver_roundtrip():
     data_port = find_free_port()
-    key_port = find_free_port()
+    key_port = find_free_port({data_port})
+    assert key_port != data_port, "KEY_PORT and DATA_PORT must be different"
 
     receiver_env = os.environ.copy()
     receiver_env.update({
