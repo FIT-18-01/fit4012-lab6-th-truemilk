@@ -18,61 +18,59 @@ OUTPUT_FILE = os.getenv("OUTPUT_FILE", "")
 LOG_FILE = os.getenv("RECEIVER_LOG_FILE", "")
 
 
-def receive_key_packet() -> bytes:
-    """Listen on KEY_PORT and receive key_length + key + iv."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
-        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        server.settimeout(TIMEOUT)
-        server.bind((HOST, KEY_PORT))
-        server.listen(1)
-        conn, _ = server.accept()
-
-        with conn:
-            conn.settimeout(TIMEOUT)
-            key_len_header = recv_exact(conn, 4)
-            key_len = int.from_bytes(key_len_header, "big")
-            rest = recv_exact(conn, key_len + 16)
-            return key_len_header + rest
+def open_listen_socket(port: int) -> socket.socket:
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server.settimeout(TIMEOUT)
+    server.bind((HOST, port))
+    server.listen(1)
+    return server
 
 
-def receive_data_packet() -> bytes:
-    """Listen on DATA_PORT and receive length + ciphertext."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
-        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        server.settimeout(TIMEOUT)
-        server.bind((HOST, DATA_PORT))
-        server.listen(1)
-        conn, _ = server.accept()
+def receive_key_packet(server: socket.socket) -> bytes:
+    """Accept a connection on the key channel and receive key_length + key + iv."""
+    conn, _ = server.accept()
+    with conn:
+        conn.settimeout(TIMEOUT)
+        key_len_header = recv_exact(conn, 4)
+        key_len = int.from_bytes(key_len_header, "big")
+        rest = recv_exact(conn, key_len + 16)
+        return key_len_header + rest
 
-        with conn:
-            conn.settimeout(TIMEOUT)
-            length_header = recv_exact(conn, LENGTH_HEADER_SIZE)
-            length = parse_length_header(length_header)
-            ciphertext = recv_exact(conn, length)
-            return length_header + ciphertext
+
+def receive_data_packet(server: socket.socket) -> bytes:
+    """Accept a connection on the data channel and receive length + ciphertext."""
+    conn, _ = server.accept()
+    with conn:
+        conn.settimeout(TIMEOUT)
+        length_header = recv_exact(conn, LENGTH_HEADER_SIZE)
+        length = parse_length_header(length_header)
+        ciphertext = recv_exact(conn, length)
+        return length_header + ciphertext
 
 
 def main() -> None:
     lines = []
 
-    line = f"[*] Receiver đang lắng nghe kênh khóa tại {HOST}:{KEY_PORT}"
-    print(line)
-    lines.append(line)
+    with open_listen_socket(KEY_PORT) as key_server, open_listen_socket(DATA_PORT) as data_server:
+        line = f"[*] Receiver đang lắng nghe kênh khóa tại {HOST}:{KEY_PORT}"
+        print(line)
+        lines.append(line)
 
-    key_packet = receive_key_packet()
-    key, iv = parse_key_packet(key_packet)
+        key_packet = receive_key_packet(key_server)
+        key, iv = parse_key_packet(key_packet)
 
-    line = "[+] Đã nhận AES key và IV."
-    print(line)
-    lines.append(line)
+        line = "[+] Đã nhận AES key và IV."
+        print(line)
+        lines.append(line)
 
-    line = f"[*] Receiver đang lắng nghe kênh dữ liệu tại {HOST}:{DATA_PORT}"
-    print(line)
-    lines.append(line)
+        line = f"[*] Receiver đang lắng nghe kênh dữ liệu tại {HOST}:{DATA_PORT}"
+        print(line)
+        lines.append(line)
 
-    data_packet = receive_data_packet()
-    length = parse_length_header(data_packet[:LENGTH_HEADER_SIZE])
-    ciphertext = data_packet[LENGTH_HEADER_SIZE:]
+        data_packet = receive_data_packet(data_server)
+        length = parse_length_header(data_packet[:LENGTH_HEADER_SIZE])
+        ciphertext = data_packet[LENGTH_HEADER_SIZE:]
 
     if len(ciphertext) != length:
         raise ValueError("Ciphertext nhận được không khớp length header.")
